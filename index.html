@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pendências do Armazém</title>
+<style>
+:root{--bg:#f4f5f7;--c:#fff;--t:#1b1f24;--p:#0b5cab;--ok:#1a7f37;--r:#c62828;--b:#d9dce1}
+@media(prefers-color-scheme:dark){:root{--bg:#14171a;--c:#1e2226;--t:#e8eaed;--b:#333a41}}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--t)}
+header{padding:12px 14px;background:var(--p);color:#fff}header h1{font-size:17px;margin:0}
+select,input,textarea,button{font:inherit;padding:9px;border:1px solid var(--b);border-radius:8px;background:var(--c);color:var(--t)}
+nav{display:flex;gap:6px;padding:10px 14px}nav button{flex:1}nav button.on{background:var(--p);color:#fff}
+main{padding:0 14px 40px;max-width:760px;margin:auto}
+.card{background:var(--c);border:1px solid var(--b);border-radius:10px;padding:12px;margin-bottom:12px}
+form{display:grid;gap:10px}.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1;min-width:130px}
+img.f{width:100%;max-height:240px;object-fit:cover;border-radius:8px;margin:8px 0}
+.tag{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;color:#fff}
+.pendente{background:var(--r)}.tratado{background:var(--ok)}
+.btn{background:var(--p);color:#fff;border:0;cursor:pointer}.btn.g{background:var(--ok)}.btn.r{background:var(--r)}
+.kpi{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.kpi b{display:block;font-size:26px}
+.hide{display:none!important}small{opacity:.7}
+</style></head><body>
+<header><h1>📦 Pendências do Armazém</h1></header>
+<nav><button data-v="novo" class="on">Novo</button><button data-v="painel">Painel</button><button data-v="cons">Consolidado</button></nav>
+<main>
+<section id="novo"><form class="card" onsubmit="salvar(event)">
+<div class="row"><input type="date" id="data" required><input id="dep" placeholder="Depósito" required></div>
+<textarea id="obs" rows="4" placeholder="O que precisa ser tratado?" required></textarea>
+<input type="file" id="foto" accept="image/*">
+<button class="btn" id="bs">Registrar pendência</button></form></section>
+
+<section id="painel" class="hide">
+<div class="card row"><input type="date" id="de" onchange="load()"><input type="date" id="ate" onchange="load()">
+<select id="st" onchange="render()"><option value="">Todos</option><option value="pendente">Pendente</option><option value="tratado">Tratado</option></select></div>
+<div id="lista"></div></section>
+
+<section id="cons" class="hide"><div id="kpis"></div></section>
+</main>
+
+<script>
+/* =====================================================================
+   CAMADA DE DADOS  —  SUBSTITUIR PELO BANCO DA EMPRESA
+   Modelo de cada registro:
+   { id, data (YYYY-MM-DD), deposito, obs, foto_url (URL ou base64),
+     status ('pendente'|'tratado'), criado_em (ISO), tratado_em (ISO|null) }
+   Hoje: salva no localStorage do navegador (apenas para teste).
+   ===================================================================== */
+const Repo={
+  _l(){return JSON.parse(localStorage.getItem('pend')||'[]')},
+  _s(a){localStorage.setItem('pend',JSON.stringify(a))},
+  async listar(de,ate){            // retorna registros filtrados por data, mais novos primeiro
+    return this._l().filter(r=>(!de||r.data>=de)&&(!ate||r.data<=ate))
+      .sort((a,b)=>b.criado_em.localeCompare(a.criado_em))},
+  async criar(r){const a=this._l();
+    a.push({...r,id:crypto.randomUUID(),status:'pendente',criado_em:new Date().toISOString(),tratado_em:null});this._s(a)},
+  async atualizar(id,campos){const a=this._l();Object.assign(a.find(x=>x.id===id),campos);this._s(a)},
+  async enviarFoto(file){          // retorna a URL da foto (aqui: base64 reduzida)
+    return new Promise(res=>{const img=new Image();img.onload=()=>{
+      const k=Math.min(1,800/img.width),c=document.createElement('canvas');
+      c.width=img.width*k;c.height=img.height*k;c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+      res(c.toDataURL('image/jpeg',.7))};img.src=URL.createObjectURL(file)})}
+};
+/* ===================== FIM DA CAMADA DE DADOS ===================== */
+
+const $=i=>document.getElementById(i);let rows=[];
+$('data').valueAsDate=new Date();
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const dur=ms=>{const m=Math.floor(ms/6e4),d=Math.floor(m/1440),h=Math.floor(m%1440/60);return(d?d+'d ':'')+(h||d?h+'h ':'')+(m%60)+'min'};
+const tempo=r=>(r.status==='pendente'?Date.now():new Date(r.tratado_em))-new Date(r.criado_em);
+
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+  ['novo','painel','cons'].forEach(v=>$(v).classList.toggle('hide',v!==b.dataset.v));
+  if(b.dataset.v!=='novo')load()});
+
+async function salvar(e){e.preventDefault();$('bs').disabled=true;
+  try{const f=$('foto').files[0];const foto_url=f?await Repo.enviarFoto(f):null;
+    await Repo.criar({data:$('data').value,deposito:$('dep').value,obs:$('obs').value,foto_url});
+    e.target.reset();$('data').valueAsDate=new Date();alert('Registrado!')
+  }catch(x){alert('Erro: '+x.message)}$('bs').disabled=false}
+
+async function load(){rows=await Repo.listar($('de').value,$('ate').value);render()}
+
+function render(){const f=$('st').value;
+  $('lista').innerHTML=rows.filter(r=>!f||r.status===f).map(r=>`<div class="card">
+  <span class="tag ${r.status}">${r.status}</span>
+  <b> ${esc(r.deposito)}</b> <small>${r.data.split('-').reverse().join('/')}</small>
+  ${r.foto_url?`<img class="f" src="${esc(r.foto_url)}">`:''}
+  <p>${esc(r.obs)}</p><small>⏱ ${r.status==='pendente'?'Pendente há':'Tratado em'} ${dur(tempo(r))}</small>
+  <div class="row" style="margin-top:8px">
+  ${r.status==='pendente'?`<button class="btn g" onclick="acao('${r.id}','tratado')">✅ Marcar tratado</button>
+  <button class="btn" onclick="enviar('${r.id}')">📤 Enviar no grupo</button>`
+  :`<button class="btn r" onclick="acao('${r.id}','pendente')">↩️ Reabrir</button>`}
+  </div></div>`).join('')||'<p>Nenhum item.</p>';
+  const p=rows.filter(r=>r.status==='pendente'),t=rows.filter(r=>r.status==='tratado');
+  const med=t.length?t.reduce((a,r)=>a+new Date(r.tratado_em)-new Date(r.criado_em),0)/t.length:0;
+  const dep={};p.forEach(r=>dep[r.deposito]=(dep[r.deposito]||0)+1);
+  $('kpis').innerHTML=`<div class="kpi"><div class="card"><b>${p.length}</b>Pendentes</div>
+  <div class="card"><b>${t.length}</b>Tratados</div>
+  <div class="card" style="grid-column:span 2"><b>${t.length?dur(med):'—'}</b>Tempo médio de tratativa</div></div>
+  <div class="card"><b>Pendentes por depósito</b><br>${Object.entries(dep).map(([k,v])=>`${esc(k)}: ${v}`).join('<br>')||'—'}</div>`}
+
+async function acao(id,status){
+  await Repo.atualizar(id,status==='tratado'?{status,tratado_em:new Date().toISOString()}:{status,tratado_em:null});load()}
+
+function enviar(id){const r=rows.find(x=>x.id===id);
+  const txt=`⚠️ PENDÊNCIA DE ORGANIZAÇÃO\n📍 Depósito: ${r.deposito}\n📅 Data: ${r.data.split('-').reverse().join('/')}\n⏱ Pendente há: ${dur(tempo(r))}\n📝 ${r.obs}`;
+  if(navigator.share)navigator.share({text:txt}).catch(()=>{});else window.open('https://wa.me/?text='+encodeURIComponent(txt))}
+</script></body></html>
